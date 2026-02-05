@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>harvester</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400&display=swap');
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    /* fix 5.7 — fallback monospace font */
+    body {
+      background: #141414;
+      color: #d4a574;
+      font-family: 'JetBrains Mono', 'Courier New', 'Consolas', monospace;
+      font-weight: 300;
+      font-size: 13px;
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    
+    /* fix 5.4 — canvas instead of span soup */
+    #dot-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0;
+    }
+    
+    .container {
+      position: relative;
+      z-index: 1;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .terminal {
+      white-space: pre;
+      line-height: 1.6;
+      background: #141414;
+      padding: 16px 20px;
+      border: 1px solid rgba(212, 165, 116, 0.2);
+      display: flex;
+      flex-direction: column;
+      max-height: 85vh;
+      max-width: 100%;
+    }
+    
+    .header { flex-shrink: 0; }
+    .positions { flex-shrink: 0; }
+    
+    .log-section {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .log-header { flex-shrink: 0; }
+    
+    .log-scroll {
+      flex: 1;
+      overflow-y: auto;
+      max-height: 200px;
+    }
+    
+    .log-scroll::-webkit-scrollbar { width: 4px; }
+    .log-scroll::-webkit-scrollbar-track { background: #1a1a1a; }
+    .log-scroll::-webkit-scrollbar-thumb {
+      background: rgba(212, 165, 116, 0.3);
+      border-radius: 2px;
+    }
+    
+    /* fix 5.2 — error section styling */
+    .error-section { flex-shrink: 0; }
+    .error-line { color: #a05a4a; opacity: 0.7; }
+    
+    .dim { opacity: 0.25; }
+    .soft { opacity: 0.45; }
+    .med { opacity: 0.65; }
+    .active { color: #e8c4a0; opacity: 0.9; }
+    .waiting { opacity: 0.35; }
+    .glow { text-shadow: 0 0 15px rgba(212, 165, 116, 0.4); }
+    .total { color: #e8c4a0; }
+    .stale { opacity: 0.3; }
+    
+    .status-line {
+      position: fixed;
+      bottom: 20px;
+      left: 28px;
+      right: 28px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      opacity: 0.35;
+      z-index: 2;
+    }
+    
+    .sol-price {
+      position: fixed;
+      top: 20px;
+      right: 28px;
+      font-size: 12px;
+      opacity: 0.6;
+      z-index: 2;
+      text-align: right;
+    }
+    
+    .price-divider {
+      border-bottom: 1px solid rgba(212, 165, 116, 0.2);
+      margin: 6px 0;
+    }
+    
+    .token-price {
+      font-size: 11px;
+      opacity: 0.5;
+      margin-top: 4px;
+    }
+    
+    .pulse {
+      animation: pulse 3s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 0.25; }
+      50% { opacity: 0.7; }
+    }
+    
+    /* fix 5.5 — mobile responsiveness */
+    @media (max-width: 600px) {
+      body { font-size: 10px; }
+      
+      .container { padding: 8px; align-items: flex-start; padding-top: 48px; }
+      
+      .terminal {
+        padding: 10px 12px;
+        max-height: none;
+        font-size: 9px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-all;
+        width: 100%;
+      }
+      
+      .sol-price {
+        top: 8px;
+        right: 12px;
+        font-size: 10px;
+      }
+      
+      .status-line {
+        bottom: 8px;
+        left: 12px;
+        right: 12px;
+        font-size: 9px;
+      }
+      
+      .log-scroll { max-height: 150px; }
+      
+      #dot-canvas { display: none; }
+    }
+    
+    /* fix 5.4 — respect reduced motion preference */
+    @media (prefers-reduced-motion: reduce) {
+      #dot-canvas { display: none; }
+      .pulse { animation: none; opacity: 0.5; }
+    }
+  </style>
+</head>
+<body>
+  <!-- fix 5.4 — canvas-based dot field -->
+  <canvas id="dot-canvas"></canvas>
+  
+  <div class="container">
+    <div class="terminal">
+      <div class="header" id="header"></div>
+      <div class="positions" id="positions"></div>
+      <div class="log-section">
+        <div class="log-header" id="log-header"></div>
+        <div class="log-scroll" id="log-scroll"></div>
+      </div>
+      <!-- fix 5.2 — error display section -->
+      <div class="error-section" id="errors"></div>
+    </div>
+  </div>
+  
+  <div class="sol-price" id="sol-price"></div>
+  
+  <div class="status-line">
+    <span><span class="pulse">●</span> <span id="connection">connecting</span></span>
+    <span id="poll-rate"></span>
+  </div>
+  
+  <script>
+    // --- fix 5.4: Canvas dot field (much lighter than span soup) ---
+    (function drawDotField() {
+      const canvas = document.getElementById('dot-canvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      
+      function resize() {
+        canvas.width = window.innerWidth * dpr;
+        canvas.height = window.innerHeight * dpr;
+        canvas.style.width = window.innerWidth + 'px';
+        canvas.style.height = window.innerHeight + 'px';
+        ctx.scale(dpr, dpr);
+        draw();
+      }
+      
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const step = 10;
+        
+        for (let y = 0; y < h; y += step) {
+          for (let x = 0; x < w; x += step) {
+            const vertFade = Math.pow(1 - y / h, 2.5);
+            const horizFade = Math.pow(1 - x / w, 1.5);
+            const density = vertFade * horizFade * (0.5 + Math.random() * 0.6);
+            
+            if (Math.random() < density * 0.55) {
+              const intensity = Math.random();
+              const opacity = (0.12 + intensity * 0.48) * vertFade * horizFade;
+              const radius = intensity > 0.7 ? 1.2 : intensity > 0.4 ? 0.8 : 0.5;
+              
+              ctx.beginPath();
+              ctx.arc(x, y, radius, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(212, 165, 116, ${opacity.toFixed(2)})`;
+              ctx.fill();
+            }
+          }
+        }
+      }
+      
+      resize();
+      // Redraw on resize but debounced
+      let resizeTimer;
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(resize, 200);
+      });
+    })();
+    
+    // --- Formatting helpers ---
+    
+    const SUB = ['₀','₁','₂','₃','₄','₅','₆','₇','₈','₉'];
+    
+    function sub(n) {
+      return String(n).split('').map(d => SUB[parseInt(d)] || d).join('');
+    }
+    
+    function fmtPrice(price) {
+      const num = parseFloat(price);
+      if (num === 0) return "0";
+      if (num >= 0.01) return num.toFixed(4);
+      const str = num.toFixed(20);
+      const match = str.match(/^0\.(0+)([1-9]\d*)/);
+      if (match) return '0.0' + sub(match[1].length) + match[2].slice(0, 4);
+      return num.toPrecision(4);
+    }
+    
+    // fix 5.1 — takes decimals as parameter, no hardcoded default
+    function fmtBal(bal, dec) {
+      const v = bal / Math.pow(10, dec);
+      if (v >= 1e6) return (v/1e6).toFixed(1) + 'M';
+      if (v >= 1e3) return (v/1e3).toFixed(1) + 'K';
+      if (v >= 1) return v.toFixed(2);
+      if (v > 0) return v.toFixed(4);
+      return '—';
+    }
+    
+    function fmtTime(ms) {
+      const h = Math.floor(ms / 3600000);
+      const m = Math.floor((ms % 3600000) / 60000);
+      return h + 'h ' + m + 'm';
+    }
+    
+    // fix 5.6 — format age for staleness display
+    function fmtAge(ms) {
+      if (!ms || ms < 0) return '';
+      const sec = Math.floor(ms / 1000);
+      if (sec < 60) return sec + 's ago';
+      const min = Math.floor(sec / 60);
+      if (min < 60) return min + 'm ago';
+      return Math.floor(min / 60) + 'h ago';
+    }
+    
+    // fix 5.8 — strategy-aware progress bar
+    function progressBar(cur, lo, hi, w, strategy) {
+      const r = hi - lo;
+      if (r === 0) return '█'.repeat(w);
+      
+      if (strategy === 'SELL') {
+        // SELL: bar fills as price moves UP through range (left=lo, right=hi)
+        if (cur <= lo) return '░'.repeat(w);
+        if (cur >= hi) return '█'.repeat(w);
+        const filled = Math.floor(((cur - lo) / r) * w);
+        return '█'.repeat(filled) + '░'.repeat(w - filled);
+      } else {
+        // BUY: bar fills as price moves DOWN through range (left=hi, right=lo)
+        if (cur >= hi) return '░'.repeat(w);
+        if (cur <= lo) return '█'.repeat(w);
+        const filled = Math.floor(((hi - cur) / r) * w);
+        return '█'.repeat(filled) + '░'.repeat(w - filled);
+      }
+    }
+    
+    // --- Render ---
+    
+    function render(state) {
+      // Prices panel
+      let priceHtml = '';
+      if (state.solPrice) {
+        // fix 5.6 — show staleness
+        const solAge = state.solPriceUpdated ? Date.now() - state.solPriceUpdated : 0;
+        const staleClass = solAge > 120000 ? ' stale' : '';
+        const ageStr = solAge > 60000 ? ` <span class="stale">${fmtAge(solAge)}</span>` : '';
+        priceHtml += `<div class="${staleClass}">SOL $${state.solPrice.toFixed(2)}${ageStr}</div>`;
+      }
+      
+      if (state.tokenPrices && Object.keys(state.tokenPrices).length > 0) {
+        priceHtml += `<div class="price-divider"></div>`;
+        for (const [symbol, price] of Object.entries(state.tokenPrices)) {
+          if (symbol !== 'SOL' && price) {
+            const p = Number(price);
+            const formatted = p >= 0.01 ? `$${p.toFixed(4)}` : `$${p.toExponential(2)}`;
+            // fix 5.6 — token staleness
+            const age = state.tokenPriceAge && state.tokenPriceAge[symbol];
+            const ageStr = age > 60000 ? ` <span class="stale">${fmtAge(age)}</span>` : '';
+            priceHtml += `<div class="token-price">${symbol} ${formatted}${ageStr}</div>`;
+          }
+        }
+      }
+      document.getElementById('sol-price').innerHTML = priceHtml;
+      
+      // Header
+      const totalSol = state.totalSol ? state.totalSol.toFixed(4) : '0';
+      document.getElementById('header').innerHTML = 
+        `<span class="med">harvester</span>
+<span class="soft">${fmtTime(state.uptime)}   ${state.pollCount} polls   ${state.harvestCount} harvests</span>
+<span class="total">total: ${totalSol} SOL</span>
+`;
+      
+      // Positions
+      let posHtml = '';
+      if (!state.positions || state.positions.length === 0) {
+        posHtml = `<span class="soft">listening...</span>\n`;
+      } else {
+        for (const p of state.positions) {
+          const inRange = state.activeId >= p.rangeLower && state.activeId <= p.rangeUpper;
+          const cls = inRange ? 'active glow' : 'waiting';
+          const stat = inRange ? 'active' : 'waiting';
+          
+          // fix 5.1 — use actual decimals from state
+          const xDec = p.tokenXDecimals || 6;
+          const yDec = p.tokenYDecimals || 9;
+          
+          // fix 5.8 — pass strategy to progress bar
+          const bar = progressBar(state.activeId, p.rangeLower, p.rangeUpper, 40, p.strategy);
+          
+          posHtml += `
+<span class="${cls}">${p.tokenXSymbol}/${p.tokenYSymbol}</span>  <span class="soft">${p.strategy.toLowerCase()} · ${stat}</span>
+<span class="soft">${fmtPrice(p.priceLower)} — ${fmtPrice(p.priceUpper)}</span>
+<span class="soft">${bar}</span>
+<span class="med">${p.tokenXSymbol.toLowerCase()} ${fmtBal(p.xBalance, xDec)}   ${p.tokenYSymbol.toLowerCase()} ${fmtBal(p.yBalance, yDec)}</span>
+`;
+        }
+      }
+      document.getElementById('positions').innerHTML = posHtml;
+      
+      // Log header
+      document.getElementById('log-header').innerHTML = 
+        `<span class="dim">─────────────────────────────────────────</span>
+<span class="soft">log</span>
+`;
+      
+      // Log scroll
+      let logHtml = '';
+      if (!state.harvests || state.harvests.length === 0) {
+        logHtml = `<span class="waiting">waiting</span>\n`;
+      } else {
+        for (const h of state.harvests) {
+          logHtml += `<span class="soft">${h.time}  ${(h.amount || '').padEnd(14)}  ${h.txSig.slice(0,8)}…</span>\n`;
+        }
+      }
+      document.getElementById('log-scroll').innerHTML = logHtml;
+      
+      // fix 5.2 — render errors
+      let errHtml = '';
+      if (state.errors && state.errors.length > 0) {
+        errHtml += `<span class="dim">─────────────────────────────────────────</span>\n`;
+        errHtml += `<span class="error-line">errors</span>\n`;
+        for (const e of state.errors.slice(0, 5)) {
+          errHtml += `<span class="error-line">${e.slice(0, 70)}</span>\n`;
+        }
+      }
+      document.getElementById('errors').innerHTML = errHtml;
+      
+      // Poll rate
+      const rateStr = state.fastMode ? '⚡' + (state.pollInterval/1000) + 's' : (state.pollInterval/1000) + 's';
+      document.getElementById('poll-rate').textContent = rateStr;
+    }
+    
+    // --- fix 5.3: WebSocket with exponential backoff ---
+    
+    let reconnectDelay = 3000;
+    const MAX_RECONNECT_DELAY = 30000;
+    
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(proto + '//' + location.host);
+      
+      ws.onopen = () => {
+        document.getElementById('connection').textContent = 'live';
+        reconnectDelay = 3000; // reset on successful connection
+      };
+      
+      ws.onmessage = (e) => render(JSON.parse(e.data));
+      
+      ws.onclose = () => {
+        document.getElementById('connection').textContent = 'reconnecting';
+        setTimeout(connect, reconnectDelay);
+        // Exponential backoff capped at 30s
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      };
+      
+      ws.onerror = () => {
+        // onclose will fire after this, handles reconnect
+      };
+    }
+    
+    connect();
+  </script>
+</body>
+</html>
